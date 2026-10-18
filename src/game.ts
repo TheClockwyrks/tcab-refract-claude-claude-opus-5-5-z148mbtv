@@ -1,45 +1,13 @@
-// Refract — the game. THIS IS THE FILE YOU IMPLEMENT.
+// Refract — the game: the state it holds, the debug surface that poses and reads
+// that state, and the three functions the engine drives.
 //
-// `src/main.ts`, `src/constants.ts` and the project's configuration are supplied
-// with the project and stay as they are. What is missing is the game: the state it
-// holds, the debug surface that poses and reads that state, and the three
-// functions below.
-//
-// FIRST, DECLARE AND EXPORT `RefractState`, exactly as `specs/state.md` fixes it,
-// and `RefractDebugApi`, the debug and automation surface
-// `specs/instrumentation.md` specifies. The stub below is written against both
-// names, so this project does not compile until they exist — the type check
-// failing on a freshly seeded workspace is the starting point, not a broken seed.
-//
-// THEN IMPLEMENT the three functions. `initialize` runs once, when the engine is
-// initialized, and returns the state and the debug surface together, as the pair
-// `[state, debug]`. `update` and `render` then run once each per frame — `update`
-// first, with the frame's delta time in SECONDS, then `render`.
-//
-// The state is a VALUE, and every frame is a transition over it. The engine hands
-// `update` the current state as a read-only view (`DeepReadonly<RefractState>`)
-// and stores whatever `update` returns as the next state; `render` is handed
-// that next state, as the same read-only view, and returns nothing. Nothing ever
-// holds a writable `RefractState`: `update` builds the next state from the current
-// one (spread the parts that change, `map` over the arrays) rather than assigning
-// into it, and a frame that returns `undefined` is refused by the engine. The
-// engine's own documentation, seeded at `engine/`, defines all of this and the
-// scoped APIs each function receives; read it before you start.
-//
-// The engine returns the surface from `engine.debug`, exactly as `initialize`
-// handed it over, which is how the game is driven from code
-// (`specs/instrumentation.md`). Because no one holds a writable state, the
-// surface is written in the shape of `update`: a pose takes the current state and
-// returns the next (`loadBoard(state, board)`), a reading takes the state and
-// returns what it read (`snapshot(state)`), and a caller drives them through
-// `engine.apply` and `engine.state`. Where its implementation lives under `src/`
-// is your call; the only fixed point is that `initialize` returns it.
-//
-// The POINTER comes from the engine as well. A beam is drawn by pressing on the
-// stage and dragging, and the engine hands `update` the pointer's position
-// already in logical stage units along with its press and release edges — the
-// engine's input documentation, seeded at `engine/`, defines the API, and
-// `specs/controls.md` states what Refract does with the three of them.
+// The state declarations below are specs/state.md's, verbatim in shape. The
+// work is split across the modules beside this one: `board.ts` (geometry and
+// notation), `rules.ts` (the limits and completion conditions), `trace.ts` (the
+// pointer drawing a beam), `flow.ts` (the screen machine and the menus),
+// `step.ts` (one frame of input), `targets.ts` (the pointer targets),
+// `generator.ts` and `solver.ts` (Cascade's boards), `render.ts` and `draw.ts`
+// (the look), and `debug.ts` (the automation surface).
 
 import type {
   Game,
@@ -48,68 +16,189 @@ import type {
   UpdateApi,
 } from "@clockwyrks/simple-2d";
 import type { DeepReadonly } from "ts-essentials";
+import { ACTIONS, BINDINGS } from "./constants";
+import { CUE_SPECS } from "./audio";
+import { createDebugApi } from "./debug";
+import { registerDiagnostics } from "./diagnostics";
+import { initialState } from "./flow";
+import { renderGame } from "./render";
+import { step } from "./step";
+
+export type Screen =
+  "title" | "howto" | "select" | "playing" | "solved" | "complete";
+
+export type Mode = "campaign" | "cascade";
+
+export type Channel = "triangle" | "square" | "diamond";
+
+export type NodeKind = "emitter" | "lens" | "crystal";
+
+export interface Cell {
+  readonly col: number;
+  readonly row: number;
+}
+
+export interface NodeState {
+  readonly col: number;
+  readonly row: number;
+  readonly kind: NodeKind;
+  readonly channel: Channel | null;
+  readonly charges: number | null;
+}
+
+export interface BoardState {
+  readonly cols: number;
+  readonly rows: number;
+  readonly nodes: readonly NodeState[];
+}
+
+export interface BeamState {
+  readonly channel: Channel;
+  readonly cells: readonly Cell[];
+}
+
+export interface TraceState {
+  readonly channel: Channel;
+}
+
+export type PointerDevice = "mouse" | "pen" | "touch";
+
+export interface PointerState {
+  readonly x: number;
+  readonly y: number;
+  readonly down: boolean;
+  readonly device: PointerDevice;
+}
+
+export interface RefractState {
+  readonly screen: Screen;
+  readonly mode: Mode;
+  readonly menuIndex: number;
+
+  readonly board: BoardState;
+  readonly beams: readonly BeamState[];
+  readonly tracing: TraceState | null;
+
+  readonly boardIndex: number;
+  readonly solvedBoards: readonly number[];
+  readonly unlockedCount: number;
+  readonly selectIndex: number;
+
+  readonly solvedCount: number;
+  readonly tier: number;
+
+  readonly pointer: PointerState;
+  readonly armedTarget: string | null;
+  readonly simTime: number;
+  readonly muted: boolean;
+}
+
+/** One node as the snapshot reports it, with its derived center and spent count. */
+export interface SnapshotNode {
+  readonly col: number;
+  readonly row: number;
+  readonly x: number;
+  readonly y: number;
+  readonly kind: NodeKind;
+  readonly channel: Channel | null;
+  readonly charges: number | null;
+  readonly spent: number | null;
+}
+
+/** What `snapshot` returns (specs/instrumentation.md, Snapshot shape). */
+export interface RefractSnapshot {
+  readonly version: number;
+  readonly screen: Screen;
+  readonly mode: Mode;
+  readonly menuIndex: number;
+  readonly boardIndex: number;
+  readonly solvedBoards: readonly number[];
+  readonly unlockedCount: number;
+  readonly selectIndex: number;
+  readonly solvedCount: number;
+  readonly tier: number;
+  readonly board: {
+    readonly cols: number;
+    readonly rows: number;
+    readonly nodes: readonly SnapshotNode[];
+  };
+  readonly beams: {
+    [channel in Channel]?: {
+      readonly cells: readonly Cell[];
+      readonly complete: boolean;
+    };
+  };
+  readonly solved: boolean;
+  readonly tracing: { readonly channel: Channel; readonly live: Cell } | null;
+  readonly pointer: PointerState;
+  readonly targets: readonly {
+    readonly id: string;
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+  }[];
+  readonly muted: boolean;
+  readonly simTime: number;
+}
+
+type View = DeepReadonly<RefractState>;
 
 /**
- * The stage background, a CSS color string. `src/main.ts` hands it to the engine
- * as the color the canvas is cleared to each frame, so the letterbox bars around
- * the stage match the bench itself. This placeholder is replaced by the build
- * with the color its bench uses.
+ * The debug and automation surface (specs/instrumentation.md). Every pose takes
+ * the current state and returns the next; `snapshot` reads one.
  */
-export const BACKGROUND = "#000";
-
-const NOT_IMPLEMENTED = "Refract: src/game.ts is not implemented yet";
+export interface RefractDebugApi {
+  readonly version: number;
+  reset(state: View): RefractState;
+  snapshot(state: View): RefractSnapshot;
+  reconcile(state: View): RefractState;
+  setMode(state: View, mode: Mode): RefractState;
+  setScreen(state: View, screen: Screen): RefractState;
+  setMenuIndex(state: View, index: number): RefractState;
+  setSolvedCount(state: View, count: number): RefractState;
+  setTier(state: View, tier: number): RefractState;
+  generateBoard(state: View, tier: number): RefractState;
+  loadBoard(state: View, board: readonly string[]): RefractState;
+  pointerDown(
+    state: View,
+    x: number,
+    y: number,
+    device?: PointerDevice,
+  ): RefractState;
+  pointerMove(
+    state: View,
+    x: number,
+    y: number,
+    device?: PointerDevice,
+  ): RefractState;
+  pointerUp(state: View, device?: PointerDevice): RefractState;
+  clear(state: View): RefractState;
+}
 
 /**
- * The game this build's engine drives.
- *
- * Implement all three functions. Nothing else in the project needs changing for
- * the game to run: `src/main.ts` already binds this object to the engine.
+ * The stage background, a CSS color string: the dark of the optical bench, which
+ * the letterbox bars carry as well.
  */
+export const BACKGROUND = "#070a12";
+
+/** The game this build's engine drives. */
 export const game: Game<RefractState, RefractDebugApi> = {
-  /**
-   * Runs once, before any frame.
-   *
-   * Register every action in ACTIONS against its BINDINGS, define the five CUES,
-   * register the diagnostic sources specs/instrumentation.md lists — each is
-   * handed the state current at the read, so none closes over the state built
-   * here — and build the complete initial state: the title screen, with every
-   * field of RefractState set, including the fields whose mode is not the one the
-   * player will choose, which start at the resting values specs/state.md gives
-   * them. Return it beside the debug surface.
-   */
-  initialize(_api: InitApi<RefractState>): [RefractState, RefractDebugApi] {
-    throw new Error(NOT_IMPLEMENTED);
+  initialize(api: InitApi<RefractState>): [RefractState, RefractDebugApi] {
+    for (const action of ACTIONS) {
+      api.input.register(action, { keys: [...BINDINGS[action]] });
+    }
+    for (const [cue, spec] of Object.entries(CUE_SPECS))
+      api.audio.define(cue, spec);
+    registerDiagnostics(api);
+    return [initialState(), createDebugApi()];
   },
 
-  /**
-   * Runs once per frame, before `render`: the next state, from the current one.
-   *
-   * `dt` is the real elapsed SECONDS of this frame, and `simTime` accumulates it
-   * on every update whatever the screen. Read the frame's actions and the pointer
-   * position and edges, resolve each pointer position in the order it arrived so
-   * a beam grows and unwinds one node at a time, run the limits in
-   * specs/beams.md over every move, play cues, and mirror the engine's mute bit
-   * into the returned state's `muted`. The value returned is what `render` draws
-   * and what the next `update` receives; `state` itself is read-only and stays as
-   * it was.
-   */
-  update(
-    _state: DeepReadonly<RefractState>,
-    _api: UpdateApi,
-    _dt: number,
-  ): RefractState {
-    throw new Error(NOT_IMPLEMENTED);
+  update(state: View, api: UpdateApi, dt: number): RefractState {
+    return step(state, api, dt);
   },
 
-  /**
-   * Runs once per frame, after `update`, with the state `update` returned.
-   *
-   * `api.ctx` arrives cleared and already carrying the logical transform, so draw
-   * in 1280x720 coordinates and never read the canvas element's size. The state
-   * arrives read-only, so the type is what guarantees that rendering changes
-   * nothing.
-   */
-  render(_state: DeepReadonly<RefractState>, _api: RenderApi): void {
-    throw new Error(NOT_IMPLEMENTED);
+  render(state: View, api: RenderApi): void {
+    renderGame(state, api.ctx);
   },
 };

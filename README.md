@@ -1,89 +1,71 @@
-# Refract — starter project
+# Refract
 
-This repository is the starting point for building **Refract**, the game the
-specification under `specs/` describes. Read `specs/overview.md` first; it says
-how the rest of the specification is organized.
+Refract is a light-tracing puzzle that runs entirely in the browser. Each board
+is a lattice of optical nodes on a dark bench. Every channel of light — amber
+triangles, cyan squares, rose diamonds — has two **emitters** (outlined shapes)
+and any number of **lenses** (filled shapes). You draw each channel's beam by
+pressing on a node and dragging from node to node: the beam must run from one
+emitter to the other and thread every lens of its channel. Channel-neutral
+**crystals** (hexagons) may be crossed by any beam, and every charge they carry
+must be spent exactly. Moves that break the rules simply don't take.
 
-The project is already wired up. It builds on the **Simple 2D** engine, which is
-installed as an ordinary dependency and documents itself under `engine/` — read
-that alongside the specs. What is missing is the game.
+Two modes are offered from the title menu:
 
-## What you own
+- **Campaign** — 24 hand-built boards in four sets, unlocked one at a time.
+- **Cascade** — an endless run of generated boards that climbs a five-tier
+  difficulty ladder as you solve them. Every generated board is checked by an
+  exhaustive solver against its tier's difficulty floor before you see it.
 
-**`src/game.ts`, and any new files you add beside it.**
+The game is built on the Simple 2D engine and draws everything in code: no art
+or audio files, no network, no backend.
 
-`src/game.ts` declares and exports `RefractState`, exactly as `specs/state.md`
-fixes it, and `RefractDebugApi`, the debug and automation surface
-`specs/instrumentation.md` specifies. The seeded stub is written against both
-names, so the project does not compile until they exist — a fresh workspace
-failing `npm run typecheck` is the starting point, not a broken seed.
+## Install
 
-`src/game.ts` then exports `game`, a `Game<RefractState, RefractDebugApi>`: three
-functions over that state. `initialize` builds the state and the debug surface
-once and returns them together as `[state, debug]`; `update` takes the current
-state as a read-only view (`DeepReadonly<RefractState>`, from `ts-essentials`)
-and returns the next state, advanced against the frame's delta time in seconds;
-and `render` is handed that next state, read-only again, and draws it. The engine
-holds the state by value and replaces it with whatever `update` returns, so a
-frame builds the next state from the current one rather than writing into it,
-and the type is what guarantees that rendering changes nothing. All three
-currently throw `"not implemented"`. Implement them.
+```sh
+npm ci
+```
 
-**The pointer comes from the engine.** A beam is drawn with the pointer, and
-the engine hands the game its position already in logical stage units along
-with its press and release edges — read the engine's input documentation for
-the API. `specs/controls.md` states what Refract does with the three of them.
+## Run in development
 
-The debug surface is a required deliverable. The engine returns it from
-`engine.debug` exactly as `initialize` handed it over, and that is how the game
-is driven from code, so it is present and exactly as `specs/instrumentation.md`
-specifies. Because nothing holds a writable state, its operations are written in
-the shape of `update`: a pose takes the current state and returns the next, and a
-caller applies it through `engine.apply((s) => debug.loadBoard(s, board))`; a
-reading takes the state and returns what it read, as `debug.snapshot(engine.state)`.
-Nothing is published to the page.
+```sh
+npm run dev
+```
 
-`RefractState` **is a contract**. Keep every field, under the name, type, and
-meaning `specs/state.md` gives it. You may add fields, but only for data you can
-rebuild from the declared ones: the declared fields are the whole of the
-authoritative state, and the surface's `reset()` restores exactly those.
+Then open the URL Vite prints (by default <http://localhost:5173>).
 
-Tests you write belong beside your sources as `src/**/*.test.ts`. `npm test`
-runs them in process, with coverage over `src/`. The engine's documentation
-carries a complete worked example of testing a game this way.
+## Production build
 
-## What you must not edit
+```sh
+npm run build
+```
 
-- **`src/main.ts`** — the fixed entry point. It creates the engine over the
-  page's canvas, binds `game` to it, and runs.
-- **`src/constants.ts`** — every figure the specification fixes: the stage and
-  board geometry, the channels, the campaign length, the tier ladder, the action
-  names, the cue names, and the screen copy. Read from it.
-- **`index.html`** — the page and the canvas the engine fits the stage into.
-- **The toolchain** — `package.json`, `tsconfig.json`, `vite.config.ts`,
-  `vitest.config.ts`, `eslint.config.js`, `.prettierrc.json`, `.gitignore`.
-- **`.vendor/`** — the vendored engine.
+This type-checks and writes a self-contained static site to `dist/`, with
+`index.html` at its root. Serve that directory from any static file server, or
+preview it locally with `npm run preview`.
 
-Add dependencies to `package.json` if you genuinely need them, and commit the
-`package-lock.json` — the build is installed with `npm ci`. Leave the existing
-entries alone.
+## Controls
 
-## Commands
+| Input                    | Does                                                         |
+| ------------------------ | ------------------------------------------------------------ |
+| Press and drag (mouse, pen, or touch) | Draws a beam from an emitter, or resumes it from either end; dragging back along a beam unwinds it. |
+| Press on a node along a beam | Cuts the beam back to that node and continues from there. |
+| `R`                      | Clears every beam on the board (also the on-screen CLEAR).   |
+| `Esc`                    | Goes back (also the on-screen BACK).                         |
+| Arrow keys / `WASD`      | Move the menu or board-grid highlight.                       |
+| `Enter` / `Space`        | Take the highlighted choice.                                 |
+| `M`                      | Mute or unmute sound.                                        |
+| `` ` ``                  | Toggle the engine's debug overlay.                           |
 
-- `npm run dev` — serves the game with hot reload.
-- `npm run build` — type-checks, then emits the static site into `dist/`.
-- `npm run preview` — serves `dist/` for a final check.
-- `npm run typecheck` — `tsc --noEmit`.
-- `npm run lint` — ESLint.
-- `npm run format` — Prettier, in check mode.
-- `npm test` — Vitest over `src/**/*.test.ts`, with coverage.
+Every menu also works with the pointer: hover or press to highlight, release on
+the same item to take it.
 
-## Before you finish
+## Development
 
-- `npm run build` produces `dist/` with `index.html` at its root, and that
-  directory runs as-is on any static host.
-- `npm run typecheck`, `npm run lint`, `npm run format`, and `npm test` all pass.
-  The same four commands are run over the repository you leave behind.
-- **Replace this file** with the `README.md` `specs/overview.md` asks the
-  finished build to ship: what the game is, how to install it, how to run it in
-  development, how to produce the production build, and the controls.
+- `npm test` — unit tests (Vitest, in Node, with coverage over `src/`).
+- `npm run typecheck`, `npm run lint`, `npm run format` — the type, lint, and
+  format checks.
+
+The source lives in `src/`: `game.ts` (state types and the engine binding),
+`rules.ts` (the beam rules), `trace.ts` (drawing with the pointer), `flow.ts`
+(screens and menus), `solver.ts` and `generator.ts` (Cascade's boards),
+`render.ts` and `draw.ts` (the look), and `debug.ts` (the automation surface).

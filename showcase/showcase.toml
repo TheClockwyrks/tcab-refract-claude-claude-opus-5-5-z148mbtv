@@ -1,0 +1,15 @@
+[[media]]
+file = "solve.json.gz"
+name = "Board 18 solved trace by trace"
+
+[[media]]
+file = "board.png"
+name = "Three channels sharing crystals"
+
+[[media]]
+file = "title.png"
+name = "The title screen"
+
+[[media]]
+file = "select.png"
+name = "The campaign's board grid"
